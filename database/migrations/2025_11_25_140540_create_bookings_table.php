@@ -17,6 +17,10 @@ return new class extends Migration
             $table->foreignId('apartment_id')->constrained('apartments');
             $table->date('start_date');
             $table->date('end_date');
+            $table->date('new_start_date')->nullable();
+        $table->date('new_end_date')->nullable();
+        $table->enum('modify_status', ['none','pending','approved','rejected'])
+              ->default('none');
         // pending - waiting for owner approval
         // approved - owner approved
         // rejected - owner rejected

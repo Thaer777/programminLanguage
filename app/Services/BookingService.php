@@ -45,8 +45,9 @@ class BookingService
        {
         throw new \Exception("Only approved bookings can be modified.");
        }
-       $booking->start_date = $newStartDate;
-       $booking->end_date = $newEndDate;
+       $booking->new_start_date = $newStartDate;
+       $booking->new_end_date = $newEndDate;
+       $booking->modify_status  = 'pending';
        $booking->save();
        return $booking;
     }

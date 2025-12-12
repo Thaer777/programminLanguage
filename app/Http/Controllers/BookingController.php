@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Apartment;
 use App\Models\Booking;
+use App\Models\User;
 use App\Services\BookingService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use League\Flysystem\UrlGeneration\TemporaryUrlGenerator;
 
 class BookingController extends Controller
@@ -61,6 +63,36 @@ $validateData['user_id'] =$request->user()->id;
             'data'    => $booking
         ], 201);
 }
+public function showAllBookingForOwner(Request $request)
+{
+    $user_id = Auth::user()->id;
+    $user = User::findOrfail($user_id);
+    if($user->role != 'owner')
+        return response()->json(['error' => 'You are not authorized'], 403);
+    $apartments = Apartment::where('user_id',$user_id)->pluck('id');
+    $booking = Booking::whereIn('apartment_id',$apartments)->where('status','pending')->with('user:firstName,lastName,phone','apartment:title,description')->get();
+    return response()->json(['pending_bookings'],200);
+}
+public function approveBoohingByOwner(Request $request)
+{
+   $booking = Booking::findOrFail($request->id);
+   if($booking->apartment->user_id != $request->user()->id)
+        return response()->json(['error' => 'You are not authorized'], 403);
+    $booking->status = 'approved';
+    $booking->save();
+        return response()->json(['message' => 'Booking approved successfully'], 200);
+}
+public function ownerRejectBooking(Request $request)
+{
+    $booking = Booking::findOrFail($request->bookingId);
+
+    if ($booking->apartment->owner_id != $request->user()->id)
+        return response()->json(['error' => 'You are not authorized'], 403);
+          $booking->status = 'rejected';
+    $booking->save();
+    return response()->json(['message' => 'Booking rejected successfully'], 200);
+
+}
    public function modifyBooking(Request $request )
    {
     $booking = Booking::findOrFail($request->bookingId);
@@ -81,20 +113,21 @@ $validateData['user_id'] =$request->user()->id;
         'start_date' => 'required|date',
         'end_date'   => 'required|date|after:new_start_date',
     ]);
-    try{
+try{
         $updatedBooking = $this->bookingService->modifyBooking(
             $booking,
             $request->start_date,
             $request->end_date
         );
         return response()->json([
-            'message' => 'Booking modified successfully.',
-            'data'    => $updatedBooking
+         'message' => 'Modification request sent. Waiting for owner approval.',
+           'booking'    => $updatedBooking
         ],200);
-    }catch(\Exception $e)
-    {
-     return response()->json(['error' => $e->getMessage()], 400);
-    }}
+     }catch(\Exception $e)
+     {
+      return response()->json(['error' => $e->getMessage()], 400);
+     }
+}
     public function cancelBooking(Request $request )
     {
           $booking = Booking::findOrFail($request->bookingId);
@@ -168,5 +201,38 @@ $apt->bookings->each(function($booking){
           'error'=>'Unauthorized'
      ],403);
     }
+public function approveModifelyBooking(Request $request)
+{
+    $booking = Booking::findOrfail($request->id);
+     if($booking->modify_status !='pending')
+    {
+        throw new \Exception("There is no modification request to approve.");
+     }
+      $booking->start_date = $booking->new_start_date;
+      $booking->end_date = $booking->new_end_date;
+
+    $booking->new_start_date = null;
+    $booking->new_end_date   = null;
+    $booking->modify_status  = 'approved';
+
+
+    $booking->save();
+    return $booking;
+}
+public function rejectModifeBooking(Request $request)
+{
+    $booking = Booking::findOrFail($request->id);
+       if ($booking->modify_status !== 'pending') {
+        throw new \Exception("There is no modification request to reject.");
+    }
+    $booking->new_start_date = null;
+    $booking->new_end_date   = null;
+    $booking->modify_status  = 'rejected';
+
+    $booking->save();
+    return $booking;
+}
+
+
 
 }

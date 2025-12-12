@@ -33,6 +33,9 @@ Route::post('/user/approveUser',[UserController::class,'approveUserByAdmin']);//
 Route::post('/user/allPending',[UserController::class,'pendingApartments']);//show all pending apartments to admin
 Route::post('user/approvedApartment',[UserController::class,'approvedRequest']);//approved apartment by admin
 Route::post('user/rejectApartment',[UserController::class,'rejectApartment']);//reject apartment by admin
+Route::post('book/approved',[BookingController::class,'approveModifelyBooking']);//approve modifely the booking by owner
+Route::post('book/reject',[BookingController::class,'rejectModifeBooking']);//reject modifely the booking by owner
+Route::post('book/allBookingInPending',[BookingController::class,'showAllBookingForOwner']);//show allBookingPending For Owner
 
 
 

@@ -14,7 +14,12 @@ class ApartmentController extends Controller
     {
  $apartmentFields = $request->validated();
 $apartmentFields['user_id'] = $request->user()->id;
+if($request->hasFile('photoOfApartment'))
+{
+$path = $request->file('photoOfApartment')->store('photoOfApartment','public');
+$apartmentFields['photoOfApartment'] = $path;
 
+}
 // فصل العلاقات
 $apartmentData = $apartmentFields;
 unset($apartmentFields['amenities'], $apartmentFields['phones']);

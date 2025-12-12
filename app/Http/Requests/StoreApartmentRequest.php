@@ -23,6 +23,7 @@ class StoreApartmentRequest extends FormRequest
     {
         return [
             'title' => 'required|string|max:255',
+            'photoOfApartment'=>'required|image|max:2048|mimes:png,jpg,jpeg,gif',
             'description' => 'nullable|string',
             'city_id' => 'required|exists:cities,id',
             'street'=> 'nullable|string|max:255',
