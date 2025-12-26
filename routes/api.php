@@ -3,6 +3,7 @@
 use App\Http\Controllers\AmenitieController;
 use App\Http\Controllers\ApartmentController;
 use App\Http\Controllers\BookingController;
+use App\Http\Controllers\FavoriteController;
 use App\Http\Controllers\ProfileOfUserController;
 use App\Http\Controllers\RatingController;
 use App\Http\Controllers\UserController;
@@ -15,7 +16,6 @@ Route::get('/user', function (Request $request) {
 Route::post('/user/register',[UserController::class,'registerNewUser']);//register a new user
 Route::post('/user/login',[UserController::class,'logInUser']);//log in user
 Route::middleware('auth:sanctum')->group(function () {
-Route::post('/user/Profile',[ProfileOfUserController::class,'createProfileOfUser']);//create profile of user
 Route::post('/user/logout',[UserController::class,'logOut']);//log out user
 Route::get('/amenities',[AmenitieController::class,'showAllAmenities']);//show all amenities
 Route::post('/apartment/create',[ApartmentController::class,'createNewApartment']);//create new apartment
@@ -36,7 +36,13 @@ Route::post('user/rejectApartment',[UserController::class,'rejectApartment']);//
 Route::post('book/approved',[BookingController::class,'approveModifelyBooking']);//approve modifely the booking by owner
 Route::post('book/reject',[BookingController::class,'rejectModifeBooking']);//reject modifely the booking by owner
 Route::post('book/allBookingInPending',[BookingController::class,'showAllBookingForOwner']);//show allBookingPending For Owner
-
-
-
+Route::post('book/approveBooking',[BookingController::class,'approveBookingByOwner']);//approve booking by owner
+Route::post('book/rejectBooking',[BookingController::class,'ownerRejectBooking']);//reject booking by owner
+Route::get('notification',[UserController::class,'getUserNotifications']);//get user notifications
+Route::post('notification/{id}/read',[UserController::class,'markAsRead']);//mark notification as read
+Route::get('notification/notRead',[UserController::class,'getNotReadNotifications']);//get not read notifications
+Route::post('Apartment/getById',[ApartmentController::class,'getApartmentById']);//get apartment by id
+Route::post('/favorites/toggle', [FavoriteController::class, 'toggleFavorite']);
+Route::get('/favorites', [FavoriteController::class, 'myFavorites']);
+Route::get('/favorites/{apartmentId}', [FavoriteController::class, 'isFavorite']);
 });

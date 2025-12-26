@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Traits\ApiResponse;
 use App\Models\Apartment;
 use App\Models\Booking;
 use App\Models\User;
@@ -9,11 +10,13 @@ use App\Services\BookingService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use League\Flysystem\UrlGeneration\TemporaryUrlGenerator;
+use Illuminate\Support\Facades\Notification;
 
 class BookingController extends Controller
 {
-    protected  $bookingService;
+    use ApiResponse;
+
+    protected $bookingService;
 
     public function __construct(BookingService $bookingService)
     {
@@ -25,214 +28,217 @@ class BookingController extends Controller
         $start_date = Carbon::createFromFormat('d/m/Y', $request->start_date)->format('Y-m-d');
         $end_date   = Carbon::createFromFormat('d/m/Y', $request->end_date)->format('Y-m-d');
 
-    $request->merge([
-        'start_date' => $start_date,
-        'end_date'   => $end_date
-    ]);
-     $validateData = $request->validate([
+        $request->merge([
+            'start_date' => $start_date,
+            'end_date'   => $end_date
+        ]);
+
+        $validateData = $request->validate([
             'apartment_id' => 'required|exists:apartments,id',
             'start_date'   => 'required|date',
             'end_date'     => 'required|date|after:start_date',
         ]);
-$validateData['user_id'] =$request->user()->id;
-         if($request->user()->role != 'renter')
-         {
-             return response()->json
-                ([
-                'error' => 'Only renters can make bookings'
-                 ], 403);
-         }
 
-        $hasConflict = $this->bookingService->hasConflict(
+        if ($request->user()->role !== 'renter') {
+            return $this->errorResponse('Only renters can make bookings', 403);
+        }
+
+        if ($this->bookingService->hasConflict(
             $request->apartment_id,
             $request->start_date,
             $request->end_date
-        );
-
-          if ($hasConflict) {
-            return response()->json([
-                'error' => 'This apartment is already booked in this period'
-            ], 409);
+        )) {
+            return $this->errorResponse('This apartment is already booked in this period', 409);
         }
-        $validateData['status'] = 'pending';
-        $booking = Booking::create(
-            $validateData
-        );
-        return response()->json([
-            'message' => 'Booking request sent. Waiting for owner approval.',
-            'data'    => $booking
-        ], 201);
-}
-public function showAllBookingForOwner(Request $request)
-{
-    $user_id = Auth::user()->id;
-    $user = User::findOrfail($user_id);
-    if($user->role != 'owner')
-        return response()->json(['error' => 'You are not authorized'], 403);
-    $apartments = Apartment::where('user_id',$user_id)->pluck('id');
-    $booking = Booking::whereIn('apartment_id',$apartments)->where('status','pending')->with('user:firstName,lastName,phone','apartment:title,description')->get();
-    return response()->json(['pending_bookings'],200);
-}
-public function approveBoohingByOwner(Request $request)
-{
-   $booking = Booking::findOrFail($request->id);
-   if($booking->apartment->user_id != $request->user()->id)
-        return response()->json(['error' => 'You are not authorized'], 403);
-    $booking->status = 'approved';
-    $booking->save();
-        return response()->json(['message' => 'Booking approved successfully'], 200);
-}
-public function ownerRejectBooking(Request $request)
-{
-    $booking = Booking::findOrFail($request->bookingId);
 
-    if ($booking->apartment->owner_id != $request->user()->id)
-        return response()->json(['error' => 'You are not authorized'], 403);
-          $booking->status = 'rejected';
-    $booking->save();
-    return response()->json(['message' => 'Booking rejected successfully'], 200);
+        $validateData['user_id'] = $request->user()->id;
+        $validateData['status']  = 'pending';
 
-}
-   public function modifyBooking(Request $request )
-   {
-    $booking = Booking::findOrFail($request->bookingId);
-    if($booking->user_id != $request->user()->id)
-    {
-        return response()->json([
-            'error' => 'You are not authorized to modify this booking.'
-        ],403);
-    }
-    $start_date = Carbon::createFromFormat('d/m/Y',$request->start_date)->format('Y-m-d');
-    $end_date   = Carbon::createFromFormat('d/m/Y',$request->end_date)->format('Y-m-d');
+        $booking = Booking::create($validateData);
 
-    $request->merge([
-        'start_date' => $start_date,
-        'end_date'   => $end_date
-    ]);
-    $validateData = $request->validate([
-        'start_date' => 'required|date',
-        'end_date'   => 'required|date|after:new_start_date',
-    ]);
-try{
-        $updatedBooking = $this->bookingService->modifyBooking(
+        return $this->successResponse(
             $booking,
-            $request->start_date,
-            $request->end_date
+            'Booking request sent. Waiting for owner approval.',
+            201
         );
-        return response()->json([
-         'message' => 'Modification request sent. Waiting for owner approval.',
-           'booking'    => $updatedBooking
-        ],200);
-     }catch(\Exception $e)
-     {
-      return response()->json(['error' => $e->getMessage()], 400);
-     }
-}
-    public function cancelBooking(Request $request )
+    }
+
+    public function showAllBookingForOwner()
     {
-          $booking = Booking::findOrFail($request->bookingId);
-           if($booking->user_id != $request->user()->id)
-           {
-   return response()->json([
-            'error' => 'You are not authorized to modify this booking.'
-        ],403);
-           }
-           try
-           {
+        $user = Auth::user();
+
+        if ($user->role !== 'owner') {
+            return $this->errorResponse('You are not authorized', 403);
+        }
+
+        $apartments = Apartment::where('user_id', $user->id)->pluck('id');
+
+        $bookings = Booking::whereIn('apartment_id', $apartments)
+            ->where('status', 'pending')
+            ->with('user:firstName,lastName,phone', 'apartment:title,description')
+            ->get();
+
+        return $this->successResponse($bookings, 'Pending bookings');
+    }
+
+    public function approveBookingByOwner(Request $request)
+    {
+        $booking = Booking::findOrFail($request->id);
+
+        if ($booking->apartment->user_id !== $request->user()->id) {
+            return $this->errorResponse('You are not authorized', 403);
+        }
+
+        $old_status = $booking->status;
+        $booking->status = 'approved';
+        $booking->save();
+
+        Notification::send(
+            $booking->user,
+            new \App\Notifications\BookingStatusChangedNotifcation($booking, $old_status)
+        );
+
+        return $this->successResponse(null, 'Booking approved successfully');
+    }
+
+    public function ownerRejectBooking(Request $request)
+    {
+        $booking = Booking::findOrFail($request->bookingId);
+
+        if ($booking->apartment->owner_id !== $request->user()->id) {
+            return $this->errorResponse('You are not authorized', 403);
+        }
+
+        $old_status = $booking->status;
+        $booking->status = 'rejected';
+        $booking->save();
+
+        Notification::send(
+            $booking->user,
+            new \App\Notifications\BookingStatusChangedNotifcation($booking, $old_status)
+        );
+
+        return $this->successResponse(null, 'Booking rejected successfully');
+    }
+
+    public function modifyBooking(Request $request)
+    {
+        $booking = Booking::findOrFail($request->bookingId);
+
+        if ($booking->user_id !== $request->user()->id) {
+            return $this->errorResponse('You are not authorized to modify this booking', 403);
+        }
+
+        $start_date = Carbon::createFromFormat('d/m/Y', $request->start_date)->format('Y-m-d');
+        $end_date   = Carbon::createFromFormat('d/m/Y', $request->end_date)->format('Y-m-d');
+
+        $request->merge([
+            'start_date' => $start_date,
+            'end_date'   => $end_date
+        ]);
+
+        $request->validate([
+            'start_date' => 'required|date',
+            'end_date'   => 'required|date|after:start_date',
+        ]);
+
+        try {
+            $updatedBooking = $this->bookingService->modifyBooking(
+                $booking,
+                $request->start_date,
+                $request->end_date
+            );
+
+            return $this->successResponse(
+                $updatedBooking,
+                'Modification request sent. Waiting for owner approval.'
+            );
+        } catch (\Exception $e) {
+            return $this->errorResponse($e->getMessage(), 400);
+        }
+    }
+
+    public function cancelBooking(Request $request)
+    {
+        $booking = Booking::findOrFail($request->bookingId);
+
+        if ($booking->user_id !== $request->user()->id) {
+            return $this->errorResponse('You are not authorized to cancel this booking', 403);
+        }
+
+        try {
+            $old_status = $booking->status;
             $canceledBooking = $this->bookingService->cancelBooking($booking);
-            return response()->json([
-                'message' => 'Booking canceled successfully.',
-                'data'    => $canceledBooking
-            ],200);
-           }
-           catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 400);
-    }
-    }
-     public function renterBookings(Request $request)
-     {
-         $user = $request->user();
-         if($user->role == 'renter')
-         {
-            $bookings = Booking::where('user_id',$user->id)
-            ->with(['apartment.city.province'])
-            ->orderBy('start_date','desc')
-            ->get()
-            ->makeHidden(['id','user_id','apartment_id','created_at','updated_at']);
-           $bookings->each(function($booking){
-           $booking->apartment->makeHidden(['id','user_id','city_id','address','description','created_at','updated_at']);
-           $booking->apartment->city->makeHidden(['id','province_id','created_at','updated_at']);
-           $booking->apartment->city->province->makeHidden(['id','created_at','updated_at']);
-             });
-             $result = $bookings->map(function($booking){
-                return [
-                    'apartment'=>$booking->apartment,
-                    'start_date'=>Carbon::parse($booking->start_date)->format('d/m/Y'),
-                    'end_date'=>Carbon::parse($booking->end_date)->format('d/m/Y'),
-                    'status'=>$booking->status
-                ];
-             });
-             return response()->json
-             ([
-                  'type'=>'renter',
-                  'booking'=>$result
-             ]);}
-             else
-             {
-               $apartments = Apartment::where('user_id',$user->id)
-               ->with('bookings.user','city.province')
-               ->get()
-               ->makeHidden(['id','user_id','city_id','address','description','created_at','updated_at']);
-            $apartments->each(function($apt){
-$apt-> city->makeHidden(['id','province_id','created_at','updated_at']);
-$apt-> city->province->makeHidden(['id','created_at','updated_at']);
-$apt->bookings->each(function($booking){
-    $booking->makeHidden(['id','user_id','apartment_id','created_at','updated_at']);
-    $booking->user->makeHidden(['id','created_at','updated_at']);
-  });  });
-    return response()->json([
-        'type'=>'owner',
-        'apartments'=>$apartments
 
-    ]);
-     }
-     return response()->json
-     ([
-          'error'=>'Unauthorized'
-     ],403);
+            Notification::send(
+                $booking->user,
+                new \App\Notifications\BookingStatusChangedNotifcation($booking, $old_status)
+            );
+
+            return $this->successResponse(
+                $canceledBooking,
+                'Booking canceled successfully'
+            );
+        } catch (\Exception $e) {
+            return $this->errorResponse($e->getMessage(), 400);
+        }
     }
-public function approveModifelyBooking(Request $request)
-{
-    $booking = Booking::findOrfail($request->id);
-     if($booking->modify_status !='pending')
+
+    public function renterBookings(Request $request)
     {
-        throw new \Exception("There is no modification request to approve.");
-     }
-      $booking->start_date = $booking->new_start_date;
-      $booking->end_date = $booking->new_end_date;
+        $user = $request->user();
 
-    $booking->new_start_date = null;
-    $booking->new_end_date   = null;
-    $booking->modify_status  = 'approved';
+        if ($user->role === 'renter') {
+            $bookings = Booking::where('user_id', $user->id)
+                ->with(['apartment.city.province'])
+                ->orderBy('start_date', 'desc')
+                ->get();
 
+            return $this->successResponse($bookings, 'Renter bookings');
+        }
 
-    $booking->save();
-    return $booking;
-}
-public function rejectModifeBooking(Request $request)
-{
-    $booking = Booking::findOrFail($request->id);
-       if ($booking->modify_status !== 'pending') {
-        throw new \Exception("There is no modification request to reject.");
+        if ($user->role === 'owner') {
+            $apartments = Apartment::where('user_id', $user->id)
+                ->with('bookings.user', 'city.province')
+                ->get();
+
+            return $this->successResponse($apartments, 'Owner apartments bookings');
+        }
+
+        return $this->errorResponse('Unauthorized', 403);
     }
-    $booking->new_start_date = null;
-    $booking->new_end_date   = null;
-    $booking->modify_status  = 'rejected';
 
-    $booking->save();
-    return $booking;
-}
+    public function approveModifelyBooking(Request $request)
+    {
+        $booking = Booking::findOrFail($request->id);
 
+        if ($booking->modify_status !== 'pending') {
+            return $this->errorResponse('There is no modification request to approve', 400);
+        }
 
+        $booking->start_date = $booking->new_start_date;
+        $booking->end_date   = $booking->new_end_date;
+        $booking->new_start_date = null;
+        $booking->new_end_date   = null;
+        $booking->modify_status  = 'approved';
+        $booking->save();
 
+        return $this->successResponse($booking, 'Modification approved');
+    }
+
+    public function rejectModifeBooking(Request $request)
+    {
+        $booking = Booking::findOrFail($request->id);
+
+        if ($booking->modify_status !== 'pending') {
+            return $this->errorResponse('There is no modification request to reject', 400);
+        }
+
+        $booking->new_start_date = null;
+        $booking->new_end_date   = null;
+        $booking->modify_status  = 'rejected';
+        $booking->save();
+
+        return $this->successResponse($booking, 'Modification rejected');
+    }
 }

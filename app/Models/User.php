@@ -67,4 +67,10 @@ public function ratings()
 {
     return $this->hasMany(Rating::class);
 }
+public function favorites()
+{
+    return $this->belongsToMany(Apartment::class, 'favorites')
+                ->withTimestamps();
+}
+
 }

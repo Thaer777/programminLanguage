@@ -11,10 +11,10 @@ class Apartment extends Model
    {
        return $this->belongsToMany(Amenitie::class, 'apartment_amenity', 'apartment_id', 'amenity_id');
    }
-   public function phones()
-   {
-       return $this->hasMany(Phone::class);
-   }
+//    public function phones()
+//    {
+//        return $this->hasMany(Phone::class);
+//    }
    public function user()
    {
        return $this->belongsTo(User::class);
@@ -31,4 +31,14 @@ class Apartment extends Model
     {
      return $this->hasManyThrough(Rating::class, Booking::class);
     }
+    public function images()
+{
+    return $this->hasMany(ApartmentImage::class);
+}
+public function favoritedBy()
+{
+    return $this->belongsToMany(User::class, 'favorites')
+                ->withTimestamps();
+}
+
 }

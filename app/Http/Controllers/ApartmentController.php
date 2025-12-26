@@ -4,165 +4,168 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreApartmentRequest;
 use App\Models\Apartment;
-use App\Models\City;
 use App\Models\Province;
+use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 
 class ApartmentController extends Controller
 {
-    public function createNewApartment(StoreApartmentRequest $request)
-    {
- $apartmentFields = $request->validated();
-$apartmentFields['user_id'] = $request->user()->id;
-if($request->hasFile('photoOfApartment'))
+    use ApiResponse;
+
+public function createNewApartment(StoreApartmentRequest $request)
 {
-$path = $request->file('photoOfApartment')->store('photoOfApartment','public');
-$apartmentFields['photoOfApartment'] = $path;
+    $apartmentFields = $request->validated();
+    $apartmentFields['user_id'] = $request->user()->id;
+    $apartmentFields['phoneOfOwner'] = $request->user()->phone;
 
-}
-// فصل العلاقات
-$apartmentData = $apartmentFields;
-unset($apartmentFields['amenities'], $apartmentFields['phones']);
+    // نخزن البيانات بدون amenities و images
+    $apartmentData = $apartmentFields;
+    unset($apartmentFields['amenities'], $apartmentFields['images']);
 
-// إنشاء الشقة
-$apartment = Apartment::create($apartmentFields);
+    // إنشاء الشقة
+    $apartment = Apartment::create($apartmentFields);
 
-// ربط المميزات
-if(!empty($apartmentData['amenities'])){
-    $apartment->amenities()->sync($apartmentData['amenities']);
-}
-
-// إضافة الهواتف
-if(!empty($apartmentData['phones'])){
-    foreach($apartmentData['phones'] as $phone){
-        $apartment->phones()->create(['phone_number' => $phone]);
+    // ربط الميزات
+    if (!empty($apartmentData['amenities'])) {
+        $apartment->amenities()->sync($apartmentData['amenities']);
     }
+
+    // حفظ الصور (متعددة)
+    if ($request->hasFile('images')) {
+        foreach ($request->file('images') as $image) {
+            $path = $image->store('apartments', 'public');
+            $apartment->images()->create([
+                'image_path' => $path
+            ]);
+        }
+    }
+
+    $apartment->load('amenities', 'city.province', 'images');
+
+    return $this->successResponse([
+        'title'        => $apartment->title,
+        'price'        => $apartment->price . $apartment->price_unit,
+        'province'     => $apartment->city->province->name,
+        'city'         => $apartment->city->name,
+        'amenities'    => $apartment->amenities->pluck('name'),
+        'phoneOfOwner' => $apartment->phoneOfOwner,
+        'images'       => $apartment->images->map(
+            fn ($img) => asset('storage/' . $img->image_path)
+        ),
+        'area'         => $apartment->area . $apartment->area_unit,
+        'CategoryOfRentType' => $apartment->CategoryOfRentType,
+        'rooms_number' => $apartment->rooms_number,
+        'floor'        => $apartment->floor,
+    ], 'Apartment created successfully', 201);
 }
 
-// تحميل العلاقات
-$apartment->load('amenities','phones','city.province');
-
-return response()->json([
-    'message' => 'Apartment created successfully',
-    'price'=> $apartment->price.$apartment->price_unit,
-    'title' => $apartment->title,
-    'province' => $apartment->city->province->name,
-    'city' => $apartment->city->name,
-    'amenities' => $apartment->amenities->pluck('name'),
-    'phones' => $apartment->phones->pluck('phone_number')
-], 201);
-}
-public function showAllApartments()
+    /* =======================
+       SHOW ALL APARTMENTS
+    ======================= */
+  public function showAllApartments()
 {
-    $apartments = Apartment::with('amenities','phones','city.province')->get();
-    $result = $apartments->map(function($apartment) {
+    $apartments = Apartment::with('amenities', 'city.province', 'images')->get();
+
+    $result = $apartments->map(function ($apartment) {
         return [
-            'price'=> $apartment->price.$apartment->price_unit,
-            'title' => $apartment->title,
-            'province' => $apartment->city->province->name,
-            'city' => $apartment->city->name,
-            'amenities' => $apartment->amenities->pluck('name'),
-            'phones' => $apartment->phones->pluck('phone_number')
+            'title'        => $apartment->title,
+            'price'        => $apartment->price . $apartment->price_unit,
+            'province'     => $apartment->city->province->name,
+            'city'         => $apartment->city->name,
+            'amenities'    => $apartment->amenities->pluck('name'),
+            'phones'       => $apartment->phoneOfOwner,
+            'images'       => $apartment->images->map(
+                fn ($img) => asset('storage/' . $img->image_path)
+            ),
+            'area'         => $apartment->area . $apartment->area_unit,
+            'CategoryOfRentType' => $apartment->CategoryOfRentType,
+            'rooms_number' => $apartment->rooms_number,
+            'floor'        => $apartment->floor,
         ];
     });
-    return response()->json($result);
+
+    return $this->successResponse($result, 'Apartments fetched successfully');
 }
-public function searchByFilters(Request $request)
-{
-    if($request->has('provinces'))
+
+    /* =======================
+       SEARCH BY FILTERS
+    ======================= */
+    public function searchByFilters(Request $request)
     {
-        $province = Province::where('name',$request->input('provinces'))->first();
-        $province = Province::where('name', $request->input('provinces'))->first();
+$query = Apartment::where('status', 'approved');
 
-if (!$province) {
-    return response()->json(['message' => 'Province not found'], 404);
-}
+        if ($request->filled('province')) {
+            $province = Province::where('name', $request->province)->first();
 
-$apartments = Apartment::whereHas('city', function($q) use ($province) {
-        $q->where('province_id', $province->id);
-    })
-    ->with('amenities', 'phones', 'city.province')
-    ->get();$province = Province::where('name', $request->input('provinces'))->first();
+            if (!$province) {
+                return $this->errorResponse('Province not found', 404);
+            }
 
-if (!$province) {
-    return response()->json(['message' => 'Province not found'], 404);
-}
+            $query->whereHas('city', function ($q) use ($province) {
+                $q->where('province_id', $province->id);
+            });
+        }
 
-$apartments = Apartment::whereHas('city', function($q) use ($province) {
-        $q->where('province_id', $province->id);
-    })
-    ->with('amenities', 'phones', 'city.province')
-    ->get();
-        $result = $apartments->map(function($apartment) {
+        if ($request->filled('city')) {
+            $query->whereHas('city', function ($q) use ($request) {
+                $q->where('name', $request->city);
+            });
+        }
+
+        if ($request->filled('price')) {
+            $min = $request->price * 0.9;
+            $max = $request->price * 1.1;
+            $query->whereBetween('price', [$min, $max]);
+        }
+
+        if ($request->filled('area')) {
+            $query->whereBetween('area', [
+                $request->area - 50,
+                $request->area + 50
+            ]);
+        }
+
+        $apartments = $query->with('amenities', 'city.province')->get();
+
+        $result = $apartments->map(function ($apartment) {
             return [
-                'price'=> $apartment->price.$apartment->price_unit,
-                'title' => $apartment->title,
-                'province' => $apartment->city->province->name,
-                'city' => $apartment->city->name,
+                'title'     => $apartment->title,
+                'price'     => $apartment->price . $apartment->price_unit,
+                'area'      => $apartment->area,
+                'province'  => $apartment->city->province->name,
+                'city'      => $apartment->city->name,
                 'amenities' => $apartment->amenities->pluck('name'),
-                'phones' => $apartment->phones->pluck('phone_number'),
-                'status'=>'pending'
+                'phones'    => $apartment->phoneOfOwner,
             ];
         });
-        return response()->json($result);
+
+        return $this->successResponse($result, 'Filtered apartments');
     }
-if($request->has('city'))
-{
-    $city = City::where('name',$request->input('city'))->first();
-    $apartments = $city->apartments()->with('amenities','phones','city.province')->get();
-    $result = $apartments->map(function($apartment) {
-        return [
-            'price'=> $apartment->price.$apartment->price_unit,
-            'title' => $apartment->title,
-            'province' => $apartment->city->province->name,
-            'city' => $apartment->city->name,
-            'amenities' => $apartment->amenities->pluck('name'),
-            'phones' => $apartment->phones->pluck('phone_number')
-        ];
-    });
-    return response()->json($result);
-}
-if($request->has('price'))
-{
-    $price = $request->input('price');
 
+    /* =======================
+       GET APARTMENT BY ID
+    ======================= */
+    public function getApartmentById(Request $request)
+    {
+        $apartment = Apartment::find($request->id);
 
-$range = 50000;
-$min = $price * 0.9;
-$max = $price * 1.1;
-$apartments = Apartment::whereBetween('price', [$min, $max])
-    ->with('amenities','phones','city.province')
-    ->get();
-    $result = $apartments->map(function($apartment) {
-        return [
-            'price'=> $apartment->price.$apartment->price_unit,
-            'title' => $apartment->title,
-            'province' => $apartment->city->province->name,
-            'city' => $apartment->city->name,
-            'amenities' => $apartment->amenities->pluck('name'),
-            'phones' => $apartment->phones->pluck('phone_number')
-        ];
-    });
-    return response()->json($result);
-}
-if($request->has('area'))
-{
-   $area = $request->input('area');
-   $range = 50;
-   $maxArea = $area+$range;
-   $minArea = $area - $range;
-    $apartments = Apartment::whereBetween('area',[$minArea,$maxArea])->with('amenities','phones','city.province')->get();
-    $result = $apartments->map(function($apartment) {
-        return [
-            'price'=> $apartment->price.$apartment->price_unit,
-            'title' => $apartment->title,
-            'province' => $apartment->city->province->name,
-            'city' => $apartment->city->name,
-            'amenities' => $apartment->amenities->pluck('name'),
-            'phones' => $apartment->phones->pluck('phone_number')
-        ];
-    });
-    return response()->json($result);
-}
-}
+        if (!$apartment) {
+            return $this->errorResponse('Apartment not found', 404);
+        }
+
+        return $this->successResponse([
+            'title'            => $apartment->title,
+            'price'            => $apartment->price . $apartment->price_unit,
+            'description'      => $apartment->description,
+            'province'         => $apartment->city->province->name,
+            'city'             => $apartment->city->name,
+            'amenities'        => $apartment->amenities->pluck('name'),
+            'phones'           => $apartment->phoneOfOwner,
+            'photoOfApartment' => asset('storage/' . $apartment->photoOfApartment),
+            'area'             => $apartment->area . $apartment->area_unit,
+            'CategoryOfRentType' => $apartment->CategoryOfRentType,
+            'rooms_number'     => $apartment->rooms_number,
+            'floor'            => $apartment->floor,
+        ], 'Apartment fetched successfully');
+    }
 }
